@@ -2,6 +2,16 @@
 
 const vscode = require('vscode');
 
+// 可选模块：pfb 字段补全。删掉 pfb/ 目录后这里会自动忽略。
+let pfbFeature = null;
+try {
+    pfbFeature = require('./pfb');
+} catch (e) {
+    if (e.code !== 'MODULE_NOT_FOUND') {
+        console.error('[emmylua-extends] pfb feature disabled:', e);
+    }
+}
+
 const COMMAND_ID = 'emmyluaExtends.gotoSourceDefinition';
 const CONFIG_SECTION = 'emmyluaExtends';
 
@@ -297,6 +307,10 @@ async function gotoSourceDefinition() {
 }
 
 function activate(context) {
+    if (pfbFeature) {
+        context.subscriptions.push(pfbFeature.activate(context));
+    }
+
     context.subscriptions.push(
         vscode.commands.registerCommand(COMMAND_ID, gotoSourceDefinition),
         vscode.workspace.onDidChangeTextDocument((e) => {
@@ -315,6 +329,9 @@ function activate(context) {
 
 function deactivate() {
     metaCache.clear();
+    if (pfbFeature) {
+        pfbFeature.dispose();
+    }
 }
 
 module.exports = { activate, deactivate };

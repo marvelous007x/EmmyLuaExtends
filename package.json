@@ -2,7 +2,7 @@
   "name": "emmylua-extends",
   "displayName": "EmmyLua Extends",
   "description": "EmmyLua 语言服务的实用增强",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "robota",
   "license": "UNLICENSED",
   "private": true,
