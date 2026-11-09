@@ -60,6 +60,41 @@ local DressingRoomWindowA = class("DressingRoomWindowA", LuaClass.LuaWindowBase)
 - 只缓存当前激活的 Lua 文件；切换文件时替换，关闭文件时清除。
 - prefab 修改后，下次补全按 mtime 自动重新解析，不需要手动同步。
 
+### 字段名与成员补全
+
+字段类型按字段名推断，与 `LuaGo:BindComponent` 的命名规则一致：先去掉绑定前缀（`gm` / `_m` / `m`），再按关键字顺序匹配。
+
+| 关键字 | 类型 |
+| --- | --- |
+| `GO` | `CS.UnityEngine.RectTransform` |
+| `Pfb` | `CS.UnityEngine.GameObject` |
+| `Btn` | `CS.UnityEngine.UI.Button` |
+| `Toggle` | `CS.UnityEngine.UI.Toggle` |
+| `Input` | `CS.UnityEngine.UI.InputField` |
+| `Text` | `CS.UnityEngine.UI.Text` |
+| `Number` | `UINumberEffect` |
+| `Img` | `CS.UnityEngine.UI.Image` |
+| `RImg` | `CS.UnityEngine.UI.RawImage` |
+| `Scroll` | `CS.UnityEngine.UI.ScrollRect` |
+| `Loop` | `SuperScrollView.LoopListView2` |
+| `Slider` | `CS.UnityEngine.UI.Slider` |
+
+对任意实例都生效，不限于 `self`，字段也不必真的挂在该实例上：
+
+```lua
+local t = {}
+t.mImgStar10.          -- 提示 CS.UnityEngine.UI.Image 的 sprite 等成员
+t.mPfbGate.transform.  -- 提示 CS.UnityEngine.Transform 的 position 等成员
+```
+
+- 触发条件是任意 `a.b.c.` / `a.b.c:` 链路，接收者可以是 table、userdata 等任意能带 `.` 的表达式。
+- 链路从第一个能按字段名推断出类型的段开始，逐级查 meta 成员类型，因此 `t.mPfbX.transform.`、`t.mTextForm.transform.position.` 这类多级访问也能提示。
+- 成员来自 `<metaDirName>` 下的 `---@class` / `---@field`，包括父类；`fun(...)` 类型显示为方法图标，其余为字段，`detail` 显示类型。
+- meta 里没有定义的类型（如 `UINumberEffect`、`SuperScrollView.LoopListView2`）不会给出成员补全。
+- 字段名匹配不到任何关键字时不做补全。
+- `self` 上显式写了 `---@field` 的字段交给 EmmyLua 自己处理，本扩展不重复补全。
+- meta 索引按文件 mtime/size 缓存，注解改动后自动重建。
+
 ### 配置（source 和 pfb 共用）
 
 `metaDirName` 和 pfb 配置都写在 workspace 的 `.vscode/emmylua-extends.json`，不使用 `settings.json`：
@@ -93,6 +128,7 @@ local DressingRoomWindowA = class("DressingRoomWindowA", LuaClass.LuaWindowBase)
 - `index.js`：VS Code 集成、缓存、补全注册。
 - `annotations.js`：扫描 `---@class` / `--pfb:`，定位光标所在类。
 - `prefab.js`：纯函数，prefab 文本 → fields，可用 Node 单独测试。
+- `metaTypes.js`：纯函数，字段名 → 组件类型，并解析 meta 注解建立成员索引。
 
 ## 设置
 

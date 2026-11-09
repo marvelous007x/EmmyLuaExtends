@@ -6,12 +6,17 @@ const path = require('path');
 
 const { scanDocument, classAt, normalizePfbPath, deriveUnityRoot, resolvePrefabFile } = require('./annotations');
 const { parsePrefabFields } = require('./prefab');
+const { buildMetaIndex, membersOf, inferFieldType } = require('./metaTypes');
 
 const CONFIG_FILE_NAME = 'emmylua-extends.json';
 const DEFAULT_PREFAB_ROOT = '../GameClient/Assets/GameResources/UI';
+const DEFAULT_META_DIR_NAME = '_meta';
 const SELF_RE = /(^|[^A-Za-z0-9_$.])self\.([A-Za-z_]\w*)?$/;
+// 任意 a.b.c. / a.b.c: 链路；链路上的字段名和成员名用来逐级推断类型。
+const CHAIN_RE = /((?:[A-Za-z_]\w*\.)+[A-Za-z_]\w*)[.:]([A-Za-z_]\w*)?$/;
 
 let cache = null;
+let metaCache = null;
 let disposables = [];
 let output = null;
 let warned = new Set();
@@ -60,8 +65,10 @@ function readConfig(document) {
         enabled: true,
         unityProjectRoot: '',
         prefabRoot: DEFAULT_PREFAB_ROOT,
+        metaDirName: DEFAULT_META_DIR_NAME,
         root: null,
         unityRoot: null,
+        metaRoot: null,
     };
     const folder = workspaceFolderFor(document);
     if (!folder) {
@@ -85,6 +92,9 @@ function readConfig(document) {
             if (typeof json.prefabRoot === 'string' && json.prefabRoot.trim()) {
                 config.prefabRoot = json.prefabRoot.trim();
             }
+            if (typeof json.metaDirName === 'string' && json.metaDirName.trim()) {
+                config.metaDirName = json.metaDirName.trim();
+            }
         }
     } catch (e) {
         if (e.code !== 'ENOENT') {
@@ -106,6 +116,10 @@ function readConfig(document) {
         : path.isAbsolute(config.prefabRoot)
             ? config.prefabRoot
             : path.resolve(base, config.prefabRoot);
+
+    config.metaRoot = path.isAbsolute(config.metaDirName)
+        ? config.metaDirName
+        : path.resolve(base, config.metaDirName);
 
     // 旧配置没写 unityProjectRoot 时，从 prefabRoot 的 Assets 段反推 Unity 工程根，
     // 这样 Assets/... 形式的 --pfb: 也能直接解析。
@@ -172,6 +186,148 @@ function getFields(docCache, config, rawPfbPath) {
     return result.fields;
 }
 
+// meta 目录里的注解按 mtime/size 组合成戳，变了才重新解析。
+function metaIndexFor(config) {
+    const dir = config.metaRoot;
+    if (!dir) {
+        return null;
+    }
+
+    let names;
+    try {
+        names = fs.readdirSync(dir).filter((name) => /\.lua$/i.test(name)).sort();
+    } catch (e) {
+        warnOnce('meta:' + dir, '找不到 meta 目录，self.<字段>. 的成员补全不可用：' + dir);
+        return null;
+    }
+
+    const stampParts = [];
+    const files = [];
+    for (const name of names) {
+        const fullPath = path.join(dir, name);
+        try {
+            const stat = fs.statSync(fullPath);
+            stampParts.push(name + ':' + stat.mtimeMs + ':' + stat.size);
+            files.push(fullPath);
+        } catch (e) {
+            // 本次跳过
+        }
+    }
+
+    const stamp = stampParts.join('|');
+    if (metaCache && metaCache.dir === dir && metaCache.stamp === stamp) {
+        return metaCache.index;
+    }
+
+    const texts = [];
+    for (const fullPath of files) {
+        try {
+            texts.push(fs.readFileSync(fullPath, 'utf8'));
+        } catch (e) {
+            // 本次跳过
+        }
+    }
+
+    const index = buildMetaIndex(texts);
+    metaCache = { dir, stamp, index };
+    return index;
+}
+
+// 从链路里第一个能按字段名推断出类型的段开始，逐级查 meta 成员的类型。
+// 例如 t.mPfbX.transform. -> mPfbX 推断为 GameObject -> transform 成员是 Transform。
+function resolveChainType(index, segments) {
+    let start = -1;
+    for (let i = 0; i < segments.length; i++) {
+        if (inferFieldType(segments[i])) {
+            start = i;
+            break;
+        }
+    }
+    if (start < 0) {
+        return null;
+    }
+
+    let typeName = inferFieldType(segments[start]);
+    for (let i = start + 1; i < segments.length; i++) {
+        const member = membersOf(index, typeName).find((m) => m.name === segments[i]);
+        if (!member) {
+            return null;
+        }
+        typeName = memberClass(index, member.type);
+        if (!typeName) {
+            return null;
+        }
+    }
+    return typeName;
+}
+
+// 成员类型可能是 `CS.X.Y`、`CS.X.Y|nil` 等，取第一个在 meta 索引里存在的类型。
+function memberClass(index, typeStr) {
+    for (let part of String(typeStr).split('|')) {
+        part = part.trim();
+        if (/^[A-Za-z_][\w.]*$/.test(part) && index.has(part)) {
+            return part;
+        }
+    }
+    return null;
+}
+
+// <任意实例>....<字段>. 的成员补全：按链路推断类型，再从 meta 里取成员。
+// 不要求接收者是 self，字段也不必真的挂在该实例上（table、userdata 都可以）。
+function provideFieldMembers(document, position, before, match) {
+    const segments = match[1].split('.');
+    const partial = match[2] || '';
+    const chainStart = before.length - partial.length - match[1].length - 1;
+    if (before.slice(0, chainStart).includes('--')) {
+        return undefined;
+    }
+
+    const config = readConfig(document);
+    if (!config.enabled) {
+        return undefined;
+    }
+
+    // self 上显式写了 ---@field 的字段交给 EmmyLua 自己处理，避免重复补全。
+    if (segments[0] === 'self' && segments.length > 1) {
+        const classInfo = classAt(ensureCache(document).scan, position.line);
+        if (classInfo && classInfo.fields.has(segments[1])) {
+            return undefined;
+        }
+    }
+
+    const index = metaIndexFor(config);
+    if (!index) {
+        return undefined;
+    }
+    const typeName = resolveChainType(index, segments);
+    if (!typeName) {
+        return undefined;
+    }
+    const members = membersOf(index, typeName);
+    if (members.length === 0) {
+        return undefined;
+    }
+
+    const range = new vscode.Range(
+        position.line,
+        position.character - partial.length,
+        position.line,
+        position.character
+    );
+    const items = [];
+    for (const member of members) {
+        const isMethod = /^fun\b/.test(member.type);
+        const item = new vscode.CompletionItem(
+            member.name,
+            isMethod ? vscode.CompletionItemKind.Method : vscode.CompletionItemKind.Field
+        );
+        item.range = range;
+        item.detail = member.type;
+        items.push(item);
+    }
+    return items.length > 0 ? items : undefined;
+}
+
 function warm(document) {
     try {
         const config = readConfig(document);
@@ -196,6 +352,12 @@ function provideCompletionItems(document, position) {
         }
 
         const before = document.lineAt(position.line).text.slice(0, position.character);
+
+        const chainMatch = CHAIN_RE.exec(before);
+        if (chainMatch) {
+            return provideFieldMembers(document, position, before, chainMatch);
+        }
+
         const match = SELF_RE.exec(before);
         if (!match) {
             return undefined;
@@ -252,7 +414,7 @@ function activate(context) {
 
     disposables.push(output);
     disposables.push(
-        vscode.languages.registerCompletionItemProvider('lua', { provideCompletionItems }, '.')
+        vscode.languages.registerCompletionItemProvider('lua', { provideCompletionItems }, '.', ':')
     );
 
     disposables.push(
@@ -294,6 +456,7 @@ function dispose() {
     }
     disposables = [];
     cache = null;
+    metaCache = null;
     warned.clear();
     output = null;
 }
