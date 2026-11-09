@@ -1,8 +1,10 @@
 'use strict';
 
+const path = require('path');
+
 // 扫描当前 Lua 文件里的类注解，建立：
 //   ---@class 类名 [: 父类]
-//   --pfb: 相对 Assets/GameResources/UI 的路径（不带 .prefab）
+//   --pfb: prefab 路径（相对 prefabRoot 或 Assets/...，可带 .prefab）
 // 并找出光标所在函数对应的类。
 
 const CLASS_RE = /^\s*---@class\s+(?:\((?:partial|exact)\)\s+)?([A-Za-z_][\w.]*)\s*(?::\s*(.*?))?\s*$/;
@@ -135,17 +137,52 @@ function classAt(scan, line) {
 }
 
 function normalizePfbPath(raw) {
-    let p = String(raw).trim().replace(/\\/g, '/');
-    p = p.replace(/^\/+/, '');
-    p = p.replace(/^Assets\/GameResources\/UI\//, '');
-    p = p.replace(/\.prefab$/i, '');
-    return p;
+    return String(raw)
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\.prefab$/i, '');
+}
+
+// 从 prefab 根目录里截出 Unity 工程根（Assets 的上一级）。
+function deriveUnityRoot(prefabRootPath) {
+    const normalized = String(prefabRootPath).replace(/\\/g, '/');
+    const idx = normalized.toLowerCase().indexOf('/assets/');
+    if (idx < 0) {
+        return null;
+    }
+    return normalized.slice(0, idx);
+}
+
+// config: { root, unityRoot }
+// --pfb: 支持相对 prefabRoot 的路径，也支持 Assets/... 的 Unity 资源路径，
+// 两者都可以带 .prefab 后缀。
+function resolvePrefabFile(config, raw) {
+    const p = normalizePfbPath(raw);
+    if (!p) {
+        return null;
+    }
+    if (path.isAbsolute(p)) {
+        return p + '.prefab';
+    }
+    if (/^Assets\//i.test(p)) {
+        if (!config || !config.unityRoot) {
+            return null;
+        }
+        return path.join(config.unityRoot, p + '.prefab');
+    }
+    if (!config || !config.root) {
+        return null;
+    }
+    return path.join(config.root, p + '.prefab');
 }
 
 module.exports = {
     scanDocument,
     classAt,
     normalizePfbPath,
+    deriveUnityRoot,
+    resolvePrefabFile,
     // 便于单独测试
     findReceiver,
     parseParentList,

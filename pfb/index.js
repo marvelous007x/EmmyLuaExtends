@@ -4,7 +4,7 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 
-const { scanDocument, classAt, normalizePfbPath } = require('./annotations');
+const { scanDocument, classAt, normalizePfbPath, deriveUnityRoot, resolvePrefabFile } = require('./annotations');
 const { parsePrefabFields } = require('./prefab');
 
 const CONFIG_FILE_NAME = 'emmylua-extends.json';
@@ -53,9 +53,16 @@ function workspaceFolderFor(document) {
 }
 
 // 配置放在 workspace 的 .vscode/emmylua-extends.json，不读 settings.json：
-//   { "enabled": true, "prefabRoot": "..." }
+//   { "enabled": true, "unityProjectRoot": "../GameClient", "prefabRoot": "Assets/GameResources/UI" }
+// unityProjectRoot 可省略；省略时 prefabRoot 按原方式相对 workspace 解析。
 function readConfig(document) {
-    const config = { enabled: true, prefabRoot: DEFAULT_PREFAB_ROOT, root: null };
+    const config = {
+        enabled: true,
+        unityProjectRoot: '',
+        prefabRoot: DEFAULT_PREFAB_ROOT,
+        root: null,
+        unityRoot: null,
+    };
     const folder = workspaceFolderFor(document);
     if (!folder) {
         return config;
@@ -72,6 +79,9 @@ function readConfig(document) {
             if (json.enabled === false) {
                 config.enabled = false;
             }
+            if (typeof json.unityProjectRoot === 'string' && json.unityProjectRoot.trim()) {
+                config.unityProjectRoot = json.unityProjectRoot.trim();
+            }
             if (typeof json.prefabRoot === 'string' && json.prefabRoot.trim()) {
                 config.prefabRoot = json.prefabRoot.trim();
             }
@@ -82,9 +92,26 @@ function readConfig(document) {
         }
     }
 
-    config.root = path.isAbsolute(config.prefabRoot)
-        ? config.prefabRoot
-        : path.resolve(folder.uri.fsPath, config.prefabRoot);
+    const base = folder.uri.fsPath;
+    if (config.unityProjectRoot) {
+        config.unityRoot = path.isAbsolute(config.unityProjectRoot)
+            ? config.unityProjectRoot
+            : path.resolve(base, config.unityProjectRoot);
+    }
+
+    config.root = config.unityRoot
+        ? path.isAbsolute(config.prefabRoot)
+            ? config.prefabRoot
+            : path.resolve(config.unityRoot, config.prefabRoot)
+        : path.isAbsolute(config.prefabRoot)
+            ? config.prefabRoot
+            : path.resolve(base, config.prefabRoot);
+
+    // 旧配置没写 unityProjectRoot 时，从 prefabRoot 的 Assets 段反推 Unity 工程根，
+    // 这样 Assets/... 形式的 --pfb: 也能直接解析。
+    if (!config.unityRoot) {
+        config.unityRoot = deriveUnityRoot(config.root);
+    }
     return config;
 }
 
@@ -105,16 +132,16 @@ function ensureCache(document) {
     return cache;
 }
 
-function getFields(docCache, root, rawPfbPath) {
-    const relative = normalizePfbPath(rawPfbPath);
-    if (!relative) {
-        return null;
-    }
-    if (!root) {
+function getFields(docCache, config, rawPfbPath) {
+    if (!config.root) {
         warnOnce('noprefabroot', '没有找到 workspace，无法解析 prefab 路径');
         return null;
     }
-    const fullPath = path.resolve(root, relative + '.prefab');
+    const fullPath = resolvePrefabFile(config, rawPfbPath);
+    if (!fullPath) {
+        reportError('resolve:' + rawPfbPath, 'pfb: 无法解析 prefab 路径：' + rawPfbPath);
+        return null;
+    }
 
     let stat;
     try {
@@ -154,7 +181,7 @@ function warm(document) {
         const docCache = ensureCache(document);
         for (const classInfo of docCache.scan.classes.values()) {
             if (classInfo.pfb) {
-                getFields(docCache, config.root, classInfo.pfb);
+                getFields(docCache, config, classInfo.pfb);
             }
         }
     } catch (e) {
@@ -191,7 +218,7 @@ function provideCompletionItems(document, position) {
             return undefined;
         }
 
-        const fields = getFields(docCache, config.root, classInfo.pfb);
+        const fields = getFields(docCache, config, classInfo.pfb);
         if (!fields || fields.length === 0) {
             return undefined;
         }

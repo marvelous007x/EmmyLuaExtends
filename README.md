@@ -51,24 +51,32 @@ function ChatManager:InitEmojiTask() end
 local DressingRoomWindowA = class("DressingRoomWindowA", LuaClass.LuaWindowBase)
 ```
 
-- `path` 是 `Assets/GameResources/UI/<path>.prefab` 里的 `<path>`，不带目录前缀和 `.prefab`。
+- `path` 支持两种写法，都可以带 `.prefab` 后缀：
+  - 相对 prefabRoot：`IllustrationsA/DressingRoomWindow`；
+  - Unity 资源路径：`Assets/GameResources/UI/IllustrationsA/DressingRoomWindow.prefab`，相对 Unity 工程根。
 - 解析规则与 `LuaFields.GenerateLuaFields(GameObject go)` 一致，只取 `fields`，忽略 `functions`。
 - 不处理嵌套 prefab（`PrefabInstance` 内的节点不会出现在结果里）。
 - `--pfb:` 指向的 prefab 文件不存在时，会弹出错误提示，同时写入输出面板。
 - 只缓存当前激活的 Lua 文件；切换文件时替换，关闭文件时清除。
 - prefab 修改后，下次补全按 mtime 自动重新解析，不需要手动同步。
 
-### 配置
+### 配置（source 和 pfb 共用）
 
-prefab 根目录写在 workspace 的 `.vscode/emmylua-extends.json`，不使用 `settings.json`：
+`metaDirName` 和 pfb 配置都写在 workspace 的 `.vscode/emmylua-extends.json`，不使用 `settings.json`：
 
 ```json
 {
     "enabled": true,
-    "prefabRoot": "../GameClient/Assets/GameResources/UI"
+    "metaDirName": "_meta",
+    "unityProjectRoot": "../GameClient",
+    "prefabRoot": "Assets/GameResources/UI"
 }
 ```
 
+- `metaDirName`：meta 注解目录名，默认 `_meta`。
+- `unityProjectRoot`：Unity 工程目录，相对 workspace 或绝对路径；配置后 `prefabRoot` 相对它解析。
+- `prefabRoot`：prefab 根目录。不写 `unityProjectRoot` 时按原方式相对 workspace 解析（兼容旧配置）。
+- 没写 `unityProjectRoot` 时，`Assets/...` 形式的路径会从 prefabRoot 里的 `Assets` 段自动反推 Unity 工程根。
 - `enabled` 为 `false` 时关闭该功能，默认开启。
 - 相对路径按 workspace 目录解析，也可以写绝对路径。
 - 没有该文件时使用默认值 `../GameClient/Assets/GameResources/UI`。
@@ -88,9 +96,7 @@ prefab 根目录写在 workspace 的 `.vscode/emmylua-extends.json`，不使用 
 
 ## 设置
 
-| 设置项                       | 默认值  | 说明                          |
-| ---------------------------- | ------- | ----------------------------- |
-| `emmyluaExtends.metaDirName` | `_meta` | meta 注解目录名，按路径段匹配 |
+本扩展没有 VS Code 配置项，所有设置都在 workspace 的 `.vscode/emmylua-extends.json`，见上文「配置」。
 
 ## 注意
 

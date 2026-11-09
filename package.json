@@ -2,7 +2,7 @@
   "name": "emmylua-extends",
   "displayName": "EmmyLua Extends",
   "description": "EmmyLua 语言服务的实用增强",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "robota",
   "license": "UNLICENSED",
   "private": true,
@@ -30,16 +30,6 @@
         "key": "f12",
         "when": "editorTextFocus && editorLangId == lua"
       }
-    ],
-    "configuration": {
-      "title": "EmmyLua Extends",
-      "properties": {
-        "emmyluaExtends.metaDirName": {
-          "type": "string",
-          "default": "_meta",
-          "description": "meta 注解目录名。该目录下的文件会把定义跳转映射到 --source: 标注的源文件。"
-        }
-      }
-    }
+    ]
   }
 }

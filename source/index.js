@@ -1,18 +1,43 @@
 'use strict';
 
 const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
 
 const { parseMeta, sourceForLine, extractSymbol, findInSource } = require('./meta');
 
 const COMMAND_ID = 'emmyluaExtends.gotoSourceDefinition';
-const CONFIG_SECTION = 'emmyluaExtends';
+const CONFIG_FILE_NAME = 'emmylua-extends.json';
+const DEFAULT_META_DIR_NAME = '_meta';
 
 /** uri string -> { lines, fileSource, classLines, classSources } */
 const metaCache = new Map();
 let disposables = [];
 
-function metaDirName() {
-    return vscode.workspace.getConfiguration(CONFIG_SECTION).get('metaDirName', '_meta');
+// meta 目录名和 pfb 配置共用一个文件：workspace 的 .vscode/emmylua-extends.json
+//   { "metaDirName": "_meta" }
+function metaDirName(uri) {
+    const folder =
+        vscode.workspace.getWorkspaceFolder(uri) ||
+        (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0]);
+    if (!folder) {
+        return DEFAULT_META_DIR_NAME;
+    }
+
+    const configPath = path.join(folder.uri.fsPath, '.vscode', CONFIG_FILE_NAME);
+    try {
+        let text = fs.readFileSync(configPath, 'utf8');
+        if (text.charCodeAt(0) === 0xFEFF) {
+            text = text.slice(1);
+        }
+        const config = JSON.parse(text);
+        if (config && typeof config.metaDirName === 'string' && config.metaDirName.trim()) {
+            return config.metaDirName.trim();
+        }
+    } catch (e) {
+        // 文件不存在或格式错误时用默认值
+    }
+    return DEFAULT_META_DIR_NAME;
 }
 
 function isMetaUri(uri) {
@@ -20,7 +45,7 @@ function isMetaUri(uri) {
         return false;
     }
     const segments = uri.fsPath.replace(/\\/g, '/').split('/');
-    return segments.includes(metaDirName());
+    return segments.includes(metaDirName(uri));
 }
 
 async function readText(uri) {
@@ -177,11 +202,6 @@ function activate() {
         }),
         vscode.workspace.onDidCloseTextDocument((e) => {
             metaCache.delete(e.document.uri.toString());
-        }),
-        vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration(CONFIG_SECTION)) {
-                metaCache.clear();
-            }
         })
     );
 
@@ -203,4 +223,7 @@ function dispose() {
 module.exports = {
     activate,
     dispose,
+    // 便于单独测试
+    metaDirName,
+    isMetaUri,
 };
