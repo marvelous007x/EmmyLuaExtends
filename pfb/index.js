@@ -32,6 +32,18 @@ function warnOnce(key, message) {
     }
 }
 
+// 只在第一次出现时弹窗，避免每次补全都打扰。
+function reportError(key, message) {
+    if (warned.has(key)) {
+        return;
+    }
+    warned.add(key);
+    if (output) {
+        output.appendLine('[error] ' + message);
+    }
+    vscode.window.showErrorMessage(message);
+}
+
 function workspaceFolderFor(document) {
     return (
         vscode.workspace.getWorkspaceFolder(document.uri) ||
@@ -108,7 +120,7 @@ function getFields(docCache, root, rawPfbPath) {
     try {
         stat = fs.statSync(fullPath);
     } catch (e) {
-        warnOnce('missing:' + fullPath, 'prefab 不存在：' + fullPath);
+        reportError('missing:' + fullPath, 'pfb: 找不到 prefab 文件：' + fullPath);
         return null;
     }
 
