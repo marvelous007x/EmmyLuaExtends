@@ -54,6 +54,7 @@ local DressingRoomWindowA = class("DressingRoomWindowA", LuaClass.LuaWindowBase)
 - `path` 支持两种写法，都可以带 `.prefab` 后缀：
   - 相对 prefabRoot：`IllustrationsA/DressingRoomWindow`；
   - Unity 资源路径：`Assets/GameResources/UI/IllustrationsA/DressingRoomWindow.prefab`，相对 Unity 工程根。
+- `pfb:` 前面的 `-` 和空格数量不限，`--pfb:`、`---pfb:`、`-- pfb:` 都能识别。
 - 解析规则与 `LuaFields.GenerateLuaFields(GameObject go)` 一致，只取 `fields`，忽略 `functions`。
 - `self.` 补全项右侧显示按字段名推断出的组件类型，与 EmmyLua 原生补全的展示一致；推断不出类型时显示 prefab 路径。
 - 不处理嵌套 prefab（`PrefabInstance` 内的节点不会出现在结果里）。

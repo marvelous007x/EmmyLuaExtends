@@ -4,11 +4,11 @@ const path = require('path');
 
 // 扫描当前 Lua 文件里的类注解，建立：
 //   ---@class 类名 [: 父类]
-//   --pfb: prefab 路径（相对 prefabRoot 或 Assets/...，可带 .prefab）
+//   --pfb: prefab 路径（前面的 - 和空格数量不限）
 // 并找出光标所在函数对应的类。
 
 const CLASS_RE = /^\s*---@class\s+(?:\((?:partial|exact)\)\s+)?([A-Za-z_][\w.]*)\s*(?::\s*(.*?))?\s*$/;
-const PFB_RE = /^\s*--pfb:\s*(.+?)\s*$/;
+const PFB_RE = /^\s*-[\s-]*pfb\s*:\s*(.+?)\s*$/;
 const FIELD_RE = /^\s*---@field\s+(?:\[\s*["']?([^\]"']+)["']?\s*\]|([A-Za-z_][\w]*))/;
 const DECL_RE = /^\s*(?:local\s+)?([A-Za-z_][\w.]*)\s*=\s*(?:class|classRedPoint)\s*\(\s*["']([^"']*)["']\s*(?:,\s*(.*?))?\s*\)/;
 const ASSIGN_RE = /^\s*(?:local\s+)?([A-Za-z_][\w.]*)\s*=/;
