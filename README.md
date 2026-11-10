@@ -55,6 +55,7 @@ local DressingRoomWindowA = class("DressingRoomWindowA", LuaClass.LuaWindowBase)
   - 相对 prefabRoot：`IllustrationsA/DressingRoomWindow`；
   - Unity 资源路径：`Assets/GameResources/UI/IllustrationsA/DressingRoomWindow.prefab`，相对 Unity 工程根。
 - 解析规则与 `LuaFields.GenerateLuaFields(GameObject go)` 一致，只取 `fields`，忽略 `functions`。
+- `self.` 补全项右侧显示按字段名推断出的组件类型，与 EmmyLua 原生补全的展示一致；推断不出类型时显示 prefab 路径。
 - 不处理嵌套 prefab（`PrefabInstance` 内的节点不会出现在结果里）。
 - `--pfb:` 指向的 prefab 文件不存在时，会弹出错误提示，同时写入输出面板。
 - 只缓存当前激活的 Lua 文件；切换文件时替换，关闭文件时清除。

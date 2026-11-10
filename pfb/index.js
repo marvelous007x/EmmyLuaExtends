@@ -318,11 +318,11 @@ function provideFieldMembers(document, position, before, match) {
     for (const member of members) {
         const isMethod = /^fun\b/.test(member.type);
         const item = new vscode.CompletionItem(
-            member.name,
+            // 结构化 label：description 显示在建议列表右侧，和 EmmyLua 原生补全一致。
+            { label: member.name, description: member.type },
             isMethod ? vscode.CompletionItemKind.Method : vscode.CompletionItemKind.Field
         );
         item.range = range;
-        item.detail = member.type;
         items.push(item);
     }
     return items.length > 0 ? items : undefined;
@@ -397,9 +397,12 @@ function provideCompletionItems(document, position) {
             if (classInfo.fields.has(field)) {
                 continue;
             }
-            const item = new vscode.CompletionItem(field, vscode.CompletionItemKind.Field);
+            const item = new vscode.CompletionItem(
+                // 结构化 label：description 显示在建议列表右侧；推断不出类型时退回 prefab 路径。
+                { label: field, description: inferFieldType(field) || detail },
+                vscode.CompletionItemKind.Field
+            );
             item.range = range;
-            item.detail = detail;
             items.push(item);
         }
         return items.length > 0 ? items : undefined;
