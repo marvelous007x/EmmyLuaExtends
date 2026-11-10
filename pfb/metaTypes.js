@@ -41,17 +41,21 @@ function parseParents(raw) {
 }
 
 // 把一段 meta 文本解析进 classes；同一类型可能分在多处（partial）声明，按字段合并。
-function parseMetaText(text, classes) {
+// filePath 用于记录字段的声明位置，供 F12 跳转。
+function parseMetaText(text, classes, filePath) {
     const index = classes || new Map();
     let current = null;
 
-    for (const line of text.split(/\r?\n/)) {
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
         const classMatch = META_CLASS_RE.exec(line);
         if (classMatch) {
             const name = classMatch[1];
             let info = index.get(name);
             if (!info) {
-                info = { name, parents: [], fields: new Map() };
+                info = { name, parents: [], fields: new Map(), locations: new Map() };
                 index.set(name, info);
             }
             for (const parent of parseParents(classMatch[2])) {
@@ -69,8 +73,14 @@ function parseMetaText(text, classes) {
 
         const fieldMatch = META_FIELD_RE.exec(line);
         if (fieldMatch) {
-            if (!current.fields.has(fieldMatch[1])) {
-                current.fields.set(fieldMatch[1], fieldMatch[2]);
+            const name = fieldMatch[1];
+            if (!current.fields.has(name)) {
+                current.fields.set(name, fieldMatch[2]);
+                current.locations.set(name, {
+                    file: filePath || '',
+                    line: i,
+                    character: line.indexOf(name),
+                });
             }
             continue;
         }
@@ -86,10 +96,15 @@ function parseMetaText(text, classes) {
     return index;
 }
 
-function buildMetaIndex(texts) {
+// entries: 文本数组，或 { file, text } 数组（file 用于记录字段位置）。
+function buildMetaIndex(entries) {
     const index = new Map();
-    for (const text of texts) {
-        parseMetaText(text, index);
+    for (const entry of entries) {
+        if (typeof entry === 'string') {
+            parseMetaText(entry, index);
+        } else if (entry && typeof entry.text === 'string') {
+            parseMetaText(entry.text, index, entry.file);
+        }
     }
     return index;
 }
@@ -106,7 +121,8 @@ function collectMembers(index, typeName, out, seen) {
     }
     for (const [name, type] of info.fields) {
         if (!out.has(name)) {
-            out.set(name, type);
+            const loc = info.locations.get(name) || {};
+            out.set(name, { type, file: loc.file || '', line: loc.line, character: loc.character });
         }
     }
     for (const parent of info.parents) {
@@ -114,7 +130,7 @@ function collectMembers(index, typeName, out, seen) {
     }
 }
 
-// 子类成员优先；沿父类链补齐。返回 [{ name, type }]。
+// 子类成员优先；沿父类链补齐。返回 [{ name, type, file, line, character }]。
 function membersOf(index, typeName) {
     const out = new Map();
     const seen = new Set();
@@ -123,7 +139,13 @@ function membersOf(index, typeName) {
         // 兼容 UINumberEffect 这类写法可能是 CS.UINumberEffect 的情况。
         collectMembers(index, 'CS.' + typeName, out, seen);
     }
-    return Array.from(out, ([name, type]) => ({ name, type }));
+    return Array.from(out, ([name, info]) => ({
+        name,
+        type: info.type,
+        file: info.file,
+        line: info.line,
+        character: info.character,
+    }));
 }
 
 // pfb 字段名 -> Unity 组件类型全名；推断不出（如落到 LuaBehaviour）返回 null。

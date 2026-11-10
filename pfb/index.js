@@ -14,6 +14,9 @@ const DEFAULT_META_DIR_NAME = '_meta';
 const SELF_RE = /(^|[^A-Za-z0-9_$.])self\.([A-Za-z_]\w*)?$/;
 // 任意 a.b.c. / a.b.c: 链路；链路上的字段名和成员名用来逐级推断类型。
 const CHAIN_RE = /((?:[A-Za-z_]\w*\.)+[A-Za-z_]\w*)[.:]([A-Za-z_]\w*)?$/;
+// F12 跳转用：光标在一个成员名上时，取它前面的接收者链路，如 `self.mGOShine:`。
+const RECEIVER_RE = /((?:[A-Za-z_]\w*\.)+[A-Za-z_]\w*)\s*[.:]\s*$/;
+const IDENT_CHAR_RE = /[A-Za-z0-9_]/;
 
 let cache = null;
 let metaCache = null;
@@ -219,16 +222,16 @@ function metaIndexFor(config) {
         return metaCache.index;
     }
 
-    const texts = [];
+    const entries = [];
     for (const fullPath of files) {
         try {
-            texts.push(fs.readFileSync(fullPath, 'utf8'));
+            entries.push({ file: fullPath, text: fs.readFileSync(fullPath, 'utf8') });
         } catch (e) {
             // 本次跳过
         }
     }
 
-    const index = buildMetaIndex(texts);
+    const index = buildMetaIndex(entries);
     metaCache = { dir, stamp, index };
     return index;
 }
@@ -328,6 +331,74 @@ function provideFieldMembers(document, position, before, match) {
     return items.length > 0 ? items : undefined;
 }
 
+// F12：pfb 字段链上的成员直接按推断出的类型查 meta，跳到注解所在行。
+// 这样不需要给字段写 ---@field，和补全用的是同一套类型推断。
+function provideDefinition(document, position) {
+    try {
+        if (document.languageId !== 'lua') {
+            return undefined;
+        }
+
+        const lineText = document.lineAt(position.line).text;
+        let start = position.character;
+        let end = position.character;
+        while (start > 0 && IDENT_CHAR_RE.test(lineText[start - 1])) {
+            start--;
+        }
+        while (end < lineText.length && IDENT_CHAR_RE.test(lineText[end])) {
+            end++;
+        }
+        const name = lineText.slice(start, end);
+        if (!name) {
+            return undefined;
+        }
+
+        const receiverMatch = RECEIVER_RE.exec(lineText.slice(0, start));
+        if (!receiverMatch) {
+            return undefined;
+        }
+        if (lineText.slice(0, start - receiverMatch[0].length).includes('--')) {
+            return undefined;
+        }
+
+        const config = readConfig(document);
+        if (!config.enabled) {
+            return undefined;
+        }
+
+        const segments = receiverMatch[1].split('.');
+        // self 上显式写了 ---@field 的字段交给 EmmyLua 自己处理。
+        if (segments[0] === 'self' && segments.length > 1) {
+            const classInfo = classAt(ensureCache(document).scan, position.line);
+            if (classInfo && classInfo.fields.has(segments[1])) {
+                return undefined;
+            }
+        }
+
+        const index = metaIndexFor(config);
+        if (!index) {
+            return undefined;
+        }
+        const typeName = resolveChainType(index, segments);
+        if (!typeName) {
+            return undefined;
+        }
+        const member = membersOf(index, typeName).find((m) => m.name === name);
+        if (!member || !member.file) {
+            return undefined;
+        }
+
+        const target = new vscode.Position(
+            member.line,
+            member.character >= 0 ? member.character : 0
+        );
+        return [new vscode.Location(vscode.Uri.file(member.file), target)];
+    } catch (e) {
+        logError(e);
+        return undefined;
+    }
+}
+
 function warm(document) {
     try {
         const config = readConfig(document);
@@ -418,6 +489,9 @@ function activate(context) {
     disposables.push(output);
     disposables.push(
         vscode.languages.registerCompletionItemProvider('lua', { provideCompletionItems }, '.', ':')
+    );
+    disposables.push(
+        vscode.languages.registerDefinitionProvider('lua', { provideDefinition })
     );
 
     disposables.push(

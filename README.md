@@ -97,6 +97,7 @@ t.mGO:                 -- RectTransform 的方法，含 SetLocalPosition
 - 成员来自 `<metaDirName>` 下的 `---@class` / `---@field`（含父类）；`fun(...)` 显示方法图标，类型显示在候选右侧。
 - meta 里没有定义的类型（如 `UINumberEffect`、`SuperScrollView.LoopListView2`）不给成员补全；字段名匹配不到关键字也不补全。
 - `self` 上显式写了 `---@field` 的字段交给 EmmyLua，本扩展不重复补全。
+- F12 在链路成员上按推断出的类型跳到 meta 注解行（如 `self.mGOShine:SetLocalPosition`），不需要给字段写 `---@field`；CS.* 没有 C# 源文件，跳转目标是 meta。
 - meta 索引按文件 mtime/size 缓存，注解改动后自动重建。
 
 ## 配置
